@@ -38,6 +38,7 @@ licensed precisely so you can lift whatever is useful.
 | `server/`        | The authoritative game server: world, entities, quests, combat, persistence, and the realtime protocol. Pure Python 3, standard library only. |
 | `atari8-client/` | Atari 8-bit client. MADS assembly, ANTIC mode 4, 2×2 tiles, talks to FujiNet over POKEY serial via a vendored Netstream handler.              |
 | `lynx-client/`   | Atari Lynx client. cc65 C with a little assembly, Suzy sprite renderer, talks to FujiNet over ComLynx.                                        |
+| `amiga-client/`  | Amiga client (Workbench 1.3+, 68000). m68k gcc C, shares the Lynx client's protocol code, talks to FujiNet over FujiNet NIO. |
 | `tools/`         | Shared build and art tooling, plus `tile-editor/`, the browser tile editor that both clients' art comes from.                                 |
 | `maps/`          | The world as editable CSV grids. `tools/import_map_csv.py` compiles them into the server.                                                     |
 | `docs/`          | The wire protocol, the Atari memory map, and the shared tile-id contract.                                                                     |

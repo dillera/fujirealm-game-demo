@@ -36,3 +36,6 @@ __pycache__/
 # Custom
 ref/
 
+
+# Amiga client build outputs
+amiga-client/build/
