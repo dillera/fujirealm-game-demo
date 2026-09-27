@@ -27,7 +27,6 @@ struct IntuitionBase *IntuitionBase = NULL;
 
 static struct Screen *screen;
 static struct Window *window;
-static UWORD *blank_pointer;
 
 /* All image memory is chip RAM, where the blitter can reach it. */
 struct chip_bitmap {
@@ -36,6 +35,7 @@ struct chip_bitmap {
 };
 
 static struct chip_bitmap tiles;     /* 16 x (16 * 52) */
+static struct chip_bitmap tiles8;    /* 16 x (8 * 52), 8x8 art in the left byte */
 static struct chip_bitmap sprites;   /* 16 x (16 * 28) */
 static PLANEPTR sprite_mask;         /* one plane, same geometry as sprites */
 static struct chip_bitmap terrain;   /* retained 320x160 terrain layer */
@@ -89,16 +89,22 @@ int gfx_open(void)
         return 1;
 
     if (alloc_bitmap(&tiles, 16, 16 * ART_TILE_COUNT) ||
+        alloc_bitmap(&tiles8, 16, 8 * ART_TILE_COUNT) ||
         alloc_bitmap(&sprites, 16, 16 * ART_SPRITE_COUNT) ||
         alloc_bitmap(&terrain, VIEW_W, VIEW_H) ||
         alloc_bitmap(&compose, VIEW_W, VIEW_H))
         return 1;
     sprite_mask = AllocMem(sprites.plane_bytes, MEMF_CHIP);
-    blank_pointer = AllocMem(4 * sizeof(UWORD), MEMF_CHIP | MEMF_CLEAR);
-    if (!sprite_mask || !blank_pointer)
+    if (!sprite_mask)
         return 1;
     for (i = 0; i < ART_TILE_COUNT; ++i)
         load_cell(&tiles, i, art_tiles[i]);
+    for (i = 0; i < ART_TILE_COUNT; ++i) {
+        int p;
+
+        for (p = 0; p < DEPTH; ++p)
+            CopyMem((APTR)art_tiles8[i][p], (UBYTE *)tiles8.bm.Planes[p] + i * 16, 16);
+    }
     for (i = 0; i < ART_SPRITE_COUNT; ++i) {
         load_cell(&sprites, i, art_sprites[i]);
         CopyMem((APTR)art_masks[i], (UBYTE *)sprite_mask + i * 32, 32);
@@ -123,14 +129,22 @@ int gfx_open(void)
     nw.Height = SCREEN_H;
     nw.DetailPen = PEN_BLACK;
     nw.BlockPen = PEN_WHITE;
-    nw.IDCMPFlags = RAWKEY;
+    nw.IDCMPFlags = RAWKEY | MOUSEBUTTONS;
     nw.Flags = BACKDROP | BORDERLESS | ACTIVATE | RMBTRAP | NOCAREREFRESH;
     nw.Screen = screen;
     nw.Type = CUSTOMSCREEN;
     window = OpenWindow(&nw);
     if (!window)
         return 1;
-    SetPointer(window, blank_pointer, 1, 16, 0, 0);
+    /* The screen's title bar is a layer in front of backdrop windows even
+     * with SCREENQUIET (which only stops the title being drawn), so it hid
+     * our top ~10 lines as a black band. Put it behind the backdrop. */
+    ShowTitle(screen, FALSE);
+    /* The Intuition pointer stays visible for mouse play; give it clear
+     * colours (sprite pens 17-19) against grass, stone and water. */
+    SetRGB4(&screen->ViewPort, 17, 0xF, 0x3, 0x2);
+    SetRGB4(&screen->ViewPort, 18, 0x0, 0x0, 0x0);
+    SetRGB4(&screen->ViewPort, 19, 0xF, 0xF, 0xF);
     gfx_set_palette(0);
     SetDrMd(window->RPort, JAM2);
     gfx_clear(PEN_NAVY);
@@ -140,7 +154,6 @@ int gfx_open(void)
 void gfx_close(void)
 {
     if (window) {
-        ClearPointer(window);
         CloseWindow(window);
         window = NULL;
     }
@@ -149,15 +162,13 @@ void gfx_close(void)
         screen = NULL;
     }
     free_bitmap(&tiles);
+    free_bitmap(&tiles8);
     free_bitmap(&sprites);
     free_bitmap(&terrain);
     free_bitmap(&compose);
     if (sprite_mask)
         FreeMem(sprite_mask, sprites.plane_bytes);
-    if (blank_pointer)
-        FreeMem(blank_pointer, 4 * sizeof(UWORD));
     sprite_mask = NULL;
-    blank_pointer = NULL;
     if (IntuitionBase)
         CloseLibrary((struct Library *)IntuitionBase);
     if (GfxBase)
@@ -330,4 +341,26 @@ void gfx_hud_line(unsigned char line, unsigned char ink, const char *text)
     /* Rows 20..24 of the text grid; line 0 sits a pixel below the rule. */
     gfx_text(0, (unsigned char)(HUD_ROW + 1 + line), ink, PEN_NAVY, padded,
              TEXT_COLS);
+}
+
+/* ------------------------------------------------------------------ */
+/* Splash screen                                                       */
+
+void gfx_cell8(unsigned char col, unsigned char row, unsigned char tile)
+{
+    if (tile >= ART_TILE_COUNT)
+        tile = 0;
+    BltBitMapRastPort(&tiles8.bm, 0, tile * 8, window->RPort, col * 8, row * 8,
+                      8, 8, MINTERM_COPY);
+}
+
+void gfx_sprite_at(int x, int y, unsigned char sprite)
+{
+    BltMaskBitMapRastPort(&sprites.bm, 0, sprite * 16, window->RPort, x, y,
+                          16, 16, MINTERM_COOKIE, sprite_mask);
+}
+
+void gfx_set_color(unsigned char pen, unsigned short rgb4)
+{
+    SetRGB4(&screen->ViewPort, pen, (rgb4 >> 8) & 15, (rgb4 >> 4) & 15, rgb4 & 15);
 }

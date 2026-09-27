@@ -1,6 +1,6 @@
 # FujiRealm Amiga client: Workbench/Kickstart 1.3 and later, over FujiNet NIO.
 #
-#   make                        build/FujiRealm, build/netprobe
+#   make                        build/FujiRealm (+ .info icon), build/netprobe
 #   make SERVER_HOST=my.host    bake another server in (same variables as the
 #                               Atari and Lynx clients)
 #   make test                   host tests (any C compiler)
@@ -32,7 +32,8 @@ CFLAGS := -std=c99 -Wall -Wextra -O2 -mcpu=68000 -msoft-float -mcrt=nix13 \
 	-D__AMIGA__ -Isrc -I$(SHARED) -Ibuild/art -I$(NIO_LIB)/include
 LDFLAGS := -mcpu=68000 -msoft-float -mcrt=nix13
 
-AMIGA_SRCS := src/main.c src/net.c src/gfx.c src/input.c src/identity.c
+AMIGA_SRCS := src/main.c src/net.c src/gfx.c src/input.c src/identity.c \
+	src/splash.c
 SHARED_SRCS := $(SHARED)/bootstrap.c $(SHARED)/rt_state.c \
 	$(SHARED)/predict.c $(SHARED)/dlgmodal.c
 OBJS := $(AMIGA_SRCS:src/%.c=build/obj/%.o) \
@@ -43,7 +44,7 @@ NIO_LIB_FILE := $(NIO_LIB)/build/fujinet-nio-amiga.a
 HEADERS := $(wildcard src/*.h) $(wildcard $(SHARED)/*.h) build/art/amiga_art.h
 ENDPOINT_STAMP := build/endpoint-$(subst :,_,$(SERVER_HOST))-$(HYBRID_SERVER_PORT)-$(LOGIN_SERVER_PORT)
 
-all: build/FujiRealm build/netprobe
+all: build/FujiRealm build/FujiRealm.info build/netprobe
 	@echo "FujiRealm -> $(SERVER_HOST):$(HYBRID_SERVER_PORT) (login $(LOGIN_SERVER_PORT))"
 
 build/FujiRealm: $(OBJS) $(NIO_LIB_FILE)
@@ -52,6 +53,10 @@ build/FujiRealm: $(OBJS) $(NIO_LIB_FILE)
 build/netprobe: tools/netprobe.c $(NIO_LIB_FILE)
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $< $(NIO_LIB_FILE) -lamiga
+
+build/FujiRealm.info: tools/mkicon.py tools/amiga_art.py $(ART_JSON)
+	@mkdir -p build
+	python3 tools/mkicon.py $@ >/dev/null
 
 # Changing the endpoint must relink, not silently keep the old address.
 $(ENDPOINT_STAMP):

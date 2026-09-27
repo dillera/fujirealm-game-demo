@@ -8,6 +8,7 @@
  *   Use     Return / keypad Enter (pick up, talk, accept)
  *   PvP     P toggles player-versus-player
  *   Quit    Esc (in a dialogue: decline)
+ *   Mouse   left click/hold: walk to the pointer; right click: shoot at it
  */
 
 #define INPUT_NONE 0xFF          /* no direction held (FACE_NONE) */
@@ -28,5 +29,10 @@ unsigned char input_quit(void);
  * '\b' backspace, '\r' return, 0x1B escape. -1 when none are queued. */
 int input_char(void);
 void input_flush_chars(void);
+
+/* Mouse, in screen pixels (our window covers the screen). */
+unsigned char input_mouse_left(void);       /* left button held */
+unsigned char input_mouse_right_click(void); /* right press since last call */
+void input_mouse_pos(int *x, int *y);
 
 #endif

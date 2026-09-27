@@ -31,6 +31,8 @@
 #define KP_9 0x3F
 
 static struct MsgPort *port;
+static struct Window *win;
+static unsigned char mouse_left, mouse_right_clicks;
 static unsigned char down[128];
 
 #define QUEUE 16
@@ -65,6 +67,7 @@ static char rawkey_char(UWORD code)
 void input_init(struct Window *window)
 {
     port = window->UserPort;
+    win = window;
     q_head = q_tail = 0;
 }
 
@@ -73,7 +76,14 @@ void input_poll(void)
     struct IntuiMessage *msg;
 
     while ((msg = (struct IntuiMessage *)GetMsg(port)) != NULL) {
-        if (msg->Class == RAWKEY) {
+        if (msg->Class == MOUSEBUTTONS) {
+            if (msg->Code == SELECTDOWN)
+                mouse_left = 1;
+            else if (msg->Code == SELECTUP)
+                mouse_left = 0;
+            else if (msg->Code == MENUDOWN)
+                ++mouse_right_clicks;
+        } else if (msg->Class == RAWKEY) {
             UWORD code = msg->Code & 0x7F;
 
             if (msg->Code & IECODE_UP_PREFIX) {
@@ -157,4 +167,23 @@ int input_char(void)
 void input_flush_chars(void)
 {
     q_head = q_tail;
+}
+
+unsigned char input_mouse_left(void)
+{
+    return mouse_left;
+}
+
+unsigned char input_mouse_right_click(void)
+{
+    unsigned char n = mouse_right_clicks;
+
+    mouse_right_clicks = 0;
+    return n != 0;
+}
+
+void input_mouse_pos(int *x, int *y)
+{
+    *x = win->MouseX;
+    *y = win->MouseY;
 }

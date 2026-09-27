@@ -52,4 +52,10 @@ void gfx_render_world(const struct rt_state *state, const unsigned char *terrain
 void gfx_hud_line(unsigned char line, unsigned char ink, const char *text);
 void gfx_hud_frame(void);
 
+/* Splash screen drawing: 8x8 tile cells on the 40x25 grid, masked sprites
+ * at pixel positions, and one palette entry (0x0RGB) for colour cycling. */
+void gfx_cell8(unsigned char col, unsigned char row, unsigned char tile);
+void gfx_sprite_at(int x, int y, unsigned char sprite);
+void gfx_set_color(unsigned char pen, unsigned short rgb4);
+
 #endif

@@ -14,8 +14,12 @@ main loop.
 
 ## Playing
 
-Load the NIO driver (FujiRealm does it itself if `fujinet-load-resident` is
-in `C:` or on `NIO:`), then run `FujiRealm`. The first run asks for a name
+Double-click the **FujiRealm** icon (the hero facing a goblin), or run
+`FujiRealm` from the Shell. If `fujinet-nio.device` is not already resident,
+FujiRealm loads it itself from `DEVS:`, `NIO:` or the current directory
+(`LoadSeg` + `InitResident`, as `fujinet-load-resident` does). A title
+screen spells FUJINET REALMS in the game's own tiles; any key, click or
+fire continues (it times out after 15 s). The first run asks for a name
 (1–8 letters or digits), logs in, and caches the identity in
 `S:FujiRealm.id` as `name,token,host` — the Lynx appkey record, in a file.
 A record from a different server is ignored and you log in afresh.
@@ -27,6 +31,8 @@ A record from a different server is ignored and you log in afresh.
 | Return | Use: pick up, talk, accept |
 | P | Toggle PvP |
 | Esc | Quit (in a dialogue: decline) |
+| Left mouse button (click or hold) | Walk to the pointer, stepping around a blocked diagonal; click yourself to Use |
+| Right mouse button | Shoot toward the pointer (nearest of eight directions) |
 
 `FujiRealm D` (any argument) replaces the key help with a link line:
 bytes received/sent, polls, prediction corrections, resyncs, bad frames.
@@ -58,6 +64,16 @@ compositing and per-map palette tints. Terrain is kept in a retained layer
 repainted only when the view scrolls or a cell changes; entities are
 cookie-cut onto a compose buffer with `BltMaskBitMapRastPort` (present in
 1.3) and copied to the screen after `WaitTOF`.
+
+**Title screen.** `src/splash.c` builds FUJINET / REALMS from a 4×5 block
+font on a 40×25 grid of the native 8×8 tiles (`art_tiles8`): water and
+sandstone faces, extruded two cells deep in grey stone and black for the 3D
+look, over a meadow with the cast standing on a road. The water shimmers by
+cycling two palette entries, so animation costs the 68000 almost nothing.
+
+**Icon.** `tools/mkicon.py` draws `FujiRealm.info` from the same tileset
+(player frame and goblin sprite, scaled for hires pixels) in the four
+Workbench 1.3 colours, as a tool icon with a 16 KB stack.
 
 **Kickstart 1.3 safety.** `-mcrt=nix13` puts the 1.3 NDK headers first, so a
 2.0-only call fails to compile. No floating point. `snprintf` only: with

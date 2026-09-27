@@ -20,7 +20,10 @@
 
 #include <dos/dos.h>
 #include <exec/types.h>
+#include <exec/execbase.h>
+#include <exec/resident.h>
 #include <proto/dos.h>
+#include <proto/exec.h>
 
 #include "fujinet-nio.h"
 #include "bootstrap.h"
@@ -31,6 +34,7 @@
 #include "net.h"
 #include "predict.h"
 #include "rt_state.h"
+#include "splash.h"
 
 static const char version_tag[] __attribute__((used)) =
     "$VER: FujiRealm 1.0 (27.9.2026) Amiga NIO client";
@@ -200,37 +204,59 @@ static void boot_fail(const char *why, const char *detail)
 /* ------------------------------------------------------------------ */
 /* FujiNet bring-up                                                    */
 
+/* Load fujinet-nio.device as a resident device ourselves, as
+ * fujinet-load-resident does: LoadSeg, find the ROMTag in the first hunk,
+ * InitResident. Running the loader through Execute() instead hangs when we
+ * were started from Workbench on 1.3, which has no CLI for it to use. */
+static int load_nio_device(const char *path)
+{
+    static const char name[] = "fujinet-nio.device";
+    BPTR seglist = LoadSeg((UBYTE *)path);
+    UWORD *p, *end;
+
+    if (!seglist)
+        return 0;
+    p = (UWORD *)((ULONG *)BADDR(seglist) + 1);
+    end = (UWORD *)((UBYTE *)BADDR(seglist) + ((ULONG *)BADDR(seglist))[-1] - 4);
+    for (; p + sizeof(struct Resident) / 2 <= end; ++p) {
+        struct Resident *r = (struct Resident *)p;
+
+        if (r->rt_MatchWord == RTC_MATCHWORD && r->rt_MatchTag == r &&
+            r->rt_Type == NT_DEVICE && r->rt_Name &&
+            strcmp((const char *)r->rt_Name, name) == 0) {
+            InitResident(r, seglist);
+            return FindName(&SysBase->DeviceList, (UBYTE *)name) != NULL;
+        }
+    }
+    UnLoadSeg(seglist);
+    return 0;
+}
+
 /* Connect to FujiNet, loading fujinet-nio.device first if it is not
- * resident (installed with Install-FujiNet-WB13, or on the NIO: volume). */
+ * resident: from DEVS: (Install-FujiNet-WB13), NIO:, or our own drawer. */
 static int connect_fujinet(void)
 {
-    static const char *const loaders[][2] = {
-        {"C:fujinet-load-resident",
-         "C:fujinet-load-resident DEVS:fujinet-nio.device fujinet-nio.device"},
-        {"NIO:fujinet-load-resident",
-         "NIO:fujinet-load-resident NIO:fujinet-nio.device fujinet-nio.device"},
+    static const char *const paths[] = {
+        "DEVS:fujinet-nio.device", "NIO:fujinet-nio.device", "fujinet-nio.device",
     };
-    BPTR nil;
-    int i;
+    unsigned i;
 
     if (net_init() == 0)
         return 0;
     net_done();
-    nil = Open((UBYTE *)"NIL:", MODE_NEWFILE);
-    for (i = 0; i < 2; ++i) {
-        BPTR lock = Lock((UBYTE *)loaders[i][0], ACCESS_READ);
+    if (FindName(&SysBase->DeviceList, (UBYTE *)"fujinet-nio.device"))
+        return 1;               /* resident but not answering */
+    for (i = 0; i < sizeof paths / sizeof paths[0]; ++i) {
+        BPTR lock = Lock((UBYTE *)paths[i], ACCESS_READ);
 
         if (!lock)
             continue;
         UnLock(lock);
-        Execute((UBYTE *)loaders[i][1], 0, nil);
-        if (net_init() == 0)
-            break;
+        if (load_nio_device(paths[i]) && net_init() == 0)
+            return 0;
         net_done();
     }
-    if (nil)
-        Close(nil);
-    return i < 2 ? 0 : 1;
+    return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -787,6 +813,53 @@ static void update_tracers(void)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Mouse: left click/hold walks to the pointer, right click shoots at it,
+ * clicking your own tile is Use. */
+
+static unsigned char target_active, target_x, target_y, mouse_use_latch;
+
+static int pointer_tile(unsigned char *wx, unsigned char *wy)
+{
+    int mx, my;
+
+    input_mouse_pos(&mx, &my);
+    if (mx < 0 || my < 0 || mx >= VIEW_W || my >= VIEW_H)
+        return 0;
+    *wx = (unsigned char)(boot.origin_x + cam_x + mx / TILE_PX);
+    *wy = (unsigned char)(boot.origin_y + cam_y + my / TILE_PX);
+    return 1;
+}
+
+static int sgn(int v)
+{
+    return v > 0 ? 1 : v < 0 ? -1 : 0;
+}
+
+/* RTS_FACE_* for a unit step (sx, sy), or FACE_NONE for (0, 0). */
+static unsigned char face_for(int sx, int sy)
+{
+    static const unsigned char table[3][3] = {
+        /* sy -1 */ {RTS_FACE_UP_LEFT, RTS_FACE_UP, RTS_FACE_UP_RIGHT},
+        /* sy  0 */ {RTS_FACE_LEFT, FACE_NONE, RTS_FACE_RIGHT},
+        /* sy  1 */ {RTS_FACE_DOWN_LEFT, RTS_FACE_DOWN, RTS_FACE_DOWN_RIGHT},
+    };
+    return table[sy + 1][sx + 1];
+}
+
+/* Aim: the nearest of the eight directions to the pointer, so a click a
+ * little off-axis still shoots straight. */
+static unsigned char aim_toward(int dx, int dy)
+{
+    int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+
+    if (ax >= 2 * ay)
+        dy = 0;
+    else if (ay >= 2 * ax)
+        dx = 0;
+    return face_for(sgn(dx), sgn(dy));
+}
+
 /* One step per server tick, with the Lynx client's cadence rules: a fresh
  * press along the axis just walked goes at once, anything else waits for the
  * next WORLD_STATE so two moves never coalesce into one diagonal delta. */
@@ -798,6 +871,38 @@ static void handle_input(void)
     unsigned char fresh = dir != input_prev_dir;
     unsigned char x = game.player_x, y = game.player_y;
 
+    unsigned char from_mouse = 0, ok;
+    unsigned char tx, ty;
+
+    if (dir != FACE_NONE)
+        target_active = 0;              /* keys and stick outrank the mouse */
+    if (input_mouse_left()) {
+        if (pointer_tile(&tx, &ty)) {
+            if (tx == game.player_x && ty == game.player_y) {
+                target_active = 0;
+                if (!mouse_use_latch) {
+                    mouse_use_latch = 1;
+                    ++pickup_counter;   /* click yourself: use / talk */
+                    send = 1;
+                }
+            } else {
+                target_x = tx;
+                target_y = ty;
+                target_active = 1;
+            }
+        }
+    } else {
+        mouse_use_latch = 0;
+    }
+    if (dir == FACE_NONE && target_active) {
+        if (game.player_x == target_x && game.player_y == target_y) {
+            target_active = 0;
+        } else {
+            dir = face_for(sgn((int)target_x - game.player_x),
+                           sgn((int)target_y - game.player_y));
+            from_mouse = 1;
+        }
+    }
     input_prev_dir = dir;
     if (dir != FACE_NONE) {
         unsigned char same_axis =
@@ -823,8 +928,35 @@ static void handle_input(void)
         buffered_dir = FACE_NONE;
         x = (unsigned char)(x + predict_shot_dx[dir]);
         y = (unsigned char)(y + predict_shot_dy[dir]);
-        if (predict_move(&predict, client_seq + 1, x, y, boot.terrain,
-                         boot.origin_x, boot.origin_y, &game)) {
+        ok = predict_move(&predict, client_seq + 1, x, y, boot.terrain,
+                          boot.origin_x, boot.origin_y, &game);
+        if (!ok && from_mouse) {
+            /* Route around: a blocked diagonal tries each axis alone. */
+            int sx = predict_shot_dx[dir], sy = predict_shot_dy[dir];
+            unsigned char alt = FACE_NONE;
+
+            if (sx && sy && predict_can_move((unsigned char)(game.player_x + sx),
+                                             game.player_y, boot.terrain,
+                                             boot.origin_x, boot.origin_y, &game))
+                alt = face_for(sx, 0);
+            else if (sx && sy &&
+                     predict_can_move(game.player_x,
+                                      (unsigned char)(game.player_y + sy),
+                                      boot.terrain, boot.origin_x,
+                                      boot.origin_y, &game))
+                alt = face_for(0, sy);
+            if (alt == FACE_NONE) {
+                target_active = 0;     /* walled in: stop trying */
+            } else {
+                dir = alt;
+                facing = alt;
+                x = (unsigned char)(game.player_x + predict_shot_dx[dir]);
+                y = (unsigned char)(game.player_y + predict_shot_dy[dir]);
+                ok = predict_move(&predict, client_seq + 1, x, y, boot.terrain,
+                                  boot.origin_x, boot.origin_y, &game);
+            }
+        }
+        if (ok) {
             game.player_x = x;
             game.player_y = y;
             move_last_dir = dir;
@@ -844,6 +976,21 @@ static void handle_input(void)
         }
     } else {
         fire_latch = 0;
+    }
+    if (input_mouse_right_click() && pointer_tile(&tx, &ty)) {
+        unsigned char aim = aim_toward((int)tx - game.player_x,
+                                       (int)ty - game.player_y);
+
+        if (aim != FACE_NONE) {
+            ++fire_counter;
+            buttons = RTS_BUTTON_FIRE;
+            fire_aim = aim_dir = aim;
+            if (aim < RTS_FACE_FIRST_DIAGONAL)
+                facing = aim;
+            rt_spawn_tracer(&game, game.player_x, game.player_y, fire_aim);
+            send = 1;
+            world_dirty = 1;
+        }
     }
     if (input_use()) {
         if (!use_latch) {
@@ -911,7 +1058,7 @@ static void update_hud(void)
                     link.rx_total, link.tx_total, link.polls, corrections,
                     resyncs, bad_frames);
         else
-            snprintf(line, sizeof line, "SPC FIRE  RET USE  P PVP  ESC QUIT");
+            snprintf(line, sizeof line, "LMB WALK  RMB/SPC FIRE  RET USE  P PVP");
         gfx_hud_line(3, PEN_GREY, line);
         hud_line_dirty[3] = 0;
     }
@@ -1212,6 +1359,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
     input_init(gfx_window());
+    splash_show();
     run();
     net_close(&link);
     net_done();
