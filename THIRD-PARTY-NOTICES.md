@@ -94,6 +94,14 @@ AtariSIO for its source, and confirm its current terms before you do.
 [https://github.com/HiassofT/MyPicoDOS](https://github.com/HiassofT/MyPicoDOS)  
 [https://www.horus.com/~hias/atari/](https://www.horus.com/~hias/atari/)
 
+## CloudpilotEmu — Palm emulator patch
+
+`palm-client/tools/emulator/cloudpilot-serial-and-scripting.patch` is a diff
+against [CloudpilotEmu](https://github.com/cloudpilot-emu/cloudpilot-emu)
+(commit `064d5d5`), which is GPL-3.0 and includes code from the Palm
+OS Emulator (© Palm, Inc.). The patch carries the same license. It is a
+development tool only: nothing from it is linked into the Palm client.
+
 ## Build-time tools
 
 Not linked into any shipped artifact and not redistributed here:
@@ -102,3 +110,6 @@ Not linked into any shipped artifact and not redistributed here:
 - **dir2atr** (AtariSIO) — builds the ATR.
 - **Pillow** — used only by the optional Lynx art/mockup scripts.
 - **node** — runs the tile editor's model tests.
+- **prc-tools-remix**, **PilRC** and the Palm OS SDK (the `palmdev` Docker
+  image) — build the Palm client; its FujiBus and N: code is compiled from a
+  [fujinet-palm](https://github.com/dillera/fujinet-palm) checkout.
